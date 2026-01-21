@@ -16,6 +16,10 @@ class SplineGenerator(QDialog):
         self.blurEnabled = False
         self.invertColour = False
         self.contours = None
+        self.colourDepth = 8
+        self.contrast = 1
+        self.contourScale = 1
+        
 
         super(SplineGenerator, self).__init__(parent)
         self.setWindowTitle("Image To Spline Tool")
@@ -38,9 +42,13 @@ class SplineGenerator(QDialog):
         self.sourceImagePreview.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.mainLayout.addWidget(self.sourceImagePreview)
 
-        self.currentContoursLabel = QLabel('Current Contours Detected: 0')
+        self.currentContoursLabel = QLabel('Splines Detected: 0')
         self.currentContoursLabel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.mainLayout.addWidget(self.currentContoursLabel)
+        self.contourSizeLabel = QLabel('Spline Size Width: 0 Height: 0')
+        self.contourSizeLabel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.mainLayout.addWidget(self.contourSizeLabel)
+        
 
         settingsGroup = QGroupBox()
         settingsLayout = QVBoxLayout()
@@ -52,6 +60,16 @@ class SplineGenerator(QDialog):
         self.invertColourCheck = QCheckBox('Invert Colour?')
         self.invertColourCheck.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         settingsLayout.addWidget(self.invertColourCheck)
+
+        colourDepthLabel = QLabel('Colour Depth')
+        settingsLayout.addWidget(colourDepthLabel)
+        self.colourDepthSlider = QSlider(Qt.Horizontal, minimum=1, maximum=8, value=8)
+        settingsLayout.addWidget(self.colourDepthSlider)
+
+        contrastLabel = QLabel('Conrast')
+        settingsLayout.addWidget(contrastLabel)
+        self.contrastSlider = QSlider(Qt.Horizontal, minimum=1, maximum=300, value=100)
+        settingsLayout.addWidget(self.contrastSlider)
 
         blockSizeHBox = QHBoxLayout()
         blockSizeHBox.setSpacing(2)
@@ -95,6 +113,11 @@ class SplineGenerator(QDialog):
 
         settingsLayout.addLayout(blurHbox)
 
+        contourScaleLabel = QLabel('Spline Scale')
+        self.contourScaleSlider = QSlider(Qt.Horizontal, minimum=0, maximum=200, value=100)
+        settingsLayout.addWidget(contourScaleLabel)
+        settingsLayout.addWidget(self.contourScaleSlider)
+
         self.exportSplineButton = QPushButton("Export Spline")
         self.exportSplineButton.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.mainLayout.addWidget(self.exportSplineButton)
@@ -110,6 +133,13 @@ class SplineGenerator(QDialog):
         self.blockSizeSlider.valueChanged.connect(self.uicb_updateContourThreshold)
         self.constantSlider.valueChanged.connect(self.uicb_updateContourThreshold)
         self.invertColourCheck.stateChanged.connect(self.uicb_toggleInvertColour)
+        self.colourDepthSlider.valueChanged.connect(self.uicb_updateColourDepth)
+        self.contrastSlider.valueChanged.connect(self.uicb_updateContrast)
+        self.contourScaleSlider.valueChanged.connect(self.uicb_updateContourScale)
+
+    def uicb_updateContourScale(self):
+        self.contourScale = self.contourScaleSlider.value() / 100
+        self.updatePreview()
 
     def uicb_toggleInvertColour(self, state : bool) -> None:
         '''
@@ -141,15 +171,34 @@ class SplineGenerator(QDialog):
         '''
         self.updatePreview()
 
+    def uicb_updateColourDepth(self):
+        self.colourDepth = self.colourDepthSlider.value()
+        self.updatePreview()
+
+    def uicb_updateContrast(self):
+        self.contrast = self.contrastSlider.value() / 100.0 
+        self.updatePreview()
+
     def updatePreview(self) -> None:
         '''
         Function to update the preview window when settings are changed
         '''
         previewImage = self.loadedImage
+
         previewImage = cv2.cvtColor(previewImage, cv2.COLOR_BGR2GRAY)
         if self.invertColour:
-            previewImage = cv2.bitwise_not(previewImage)    
+            previewImage = cv2.bitwise_not(previewImage)  
+
         
+        levels = 1 << self.colourDepth 
+        factor = 256 // levels
+        previewImage = (previewImage // factor) * factor + (factor // 2)
+        previewImage = np.clip(previewImage, 0, 255).astype(np.uint8)
+        
+        brightness = 128 * (1 - self.contrast)               # Keeps midtones neutral
+        previewImage = cv2.addWeighted(previewImage, self.contrast, np.zeros_like(previewImage), 0, brightness)
+        previewImage = np.clip(previewImage, 0, 255).astype(np.uint8)
+
         if self.blurEnabled:
             kernelSize = self.blurAmountSlider.value()
             if kernelSize % 2 == 0:
@@ -162,8 +211,15 @@ class SplineGenerator(QDialog):
 
         binary = cv2.adaptiveThreshold(previewImage, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, blockSize,constant) 
         contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
         self.contours = contours
-        self.currentContoursLabel.setText(f'Current Contours Detected: {len(contours)}')
+        self.currentContoursLabel.setText(f'Splines Detected: {len(contours)}')
+
+        largestContour = max(self.contours, key=cv2.contourArea)
+        
+        x, y, w, h = cv2.boundingRect(largestContour)
+        self.contourSizeLabel.setText(f'Spline Size Width: {round(w * self.contourScale)} Height: {round(h * self.contourScale)}')
+
         previewImage = cv2.cvtColor(previewImage, cv2.COLOR_GRAY2BGR)
         cv2.drawContours(previewImage, contours, -1, (0, 0, 255), 4)
         qImage = QImage(previewImage.data, previewImage.shape[1], previewImage.shape[0],
@@ -190,11 +246,14 @@ class SplineGenerator(QDialog):
             return
 
         contour = max(self.contours, key=cv2.contourArea)
+
         points = contour[:, 0, :].astype(float)
+
+        points = points * self.contourScale
 
         if not np.allclose(points[0], points[-1]):
             points = np.vstack([points, points[0]])
-
+ 
         splinePoints = np.column_stack([points[:, 0], points[:, 1], np.zeros(len(points))])
     
         csvHeader = "Index,X,Y,Z\n"
