@@ -1,6 +1,6 @@
 # ImageToSplineTool
 This is a simple tool to run edge detection on an image and export the detected edges as a csv of points that can be used to generate splines in various DCC's and game engines.
 
-<img width="412" height="660" alt="ShowcaseImage" src="https://github.com/user-attachments/assets/f5038b3e-db24-435b-8bf1-a2e73332f781" />
+<img width="497" height="680" alt="ShowcaseImage" src="https://github.com/user-attachments/assets/88b4c555-e5dd-4328-8169-cb739b63a33a" />
 
-Icon Attribution: <a href="https://www.flaticon.com/free-icons/spline" title="spline icons">Spline icons created by Creaticca Creative Agency - Flaticon</a>
+<img width="1428" height="1060" alt="ShowcaseImageUnreal" src="https://github.com/user-attachments/assets/910fb77d-aaba-4d85-944b-b2b8a055f4fa" />
